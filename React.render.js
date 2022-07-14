@@ -5,6 +5,12 @@ let workRoot = null;
 let currentRoot = null;
 
 let deletes = [];
+
+let wipFiber = [];
+
+let hooksIndex = 0;
+
+
 function reconclieChildren(fiber,elements) {
     let index = 0;
     let preSibling = null;
@@ -57,38 +63,87 @@ function reconclieChildren(fiber,elements) {
 
 }
 
-function perforUnitOfWork(fiber) {
-    //执行任务单元 虚拟dom 转化成 真实dom
-    if(!fiber.dom) {
-        fiber.dom = createDom(fiber)
-    }
-    // if(fiber.parent) {
-    //     fiber.parent.dom.appenchild(fiber.dom);
-    // }
-    //为当前的fiber创建其他子节点的fiber
-    // fiber parent child sibling  fiber架构
-
+function updatehHostComponent(fiber) {
+        //执行任务单元 虚拟dom 转化成 真实dom
+        if(!fiber.dom) {
+            fiber.dom = createDom(fiber)
+        }
+        // if(fiber.parent) {
+        //     fiber.parent.dom.appenchild(fiber.dom);
+        // }
+        //为当前的fiber创建其他子节点的fiber
+        // fiber parent child sibling  fiber架构
     
-    const elements = fiber?.props?.children;
-    // let preSibling = null;
-    // elements.forEach((childrenElement,index) => {
-    //     const newFiber = {
-    //         parent: fiber,
-    //         props: childrenElement.props,
-    //         type: childrenElement.type,
-    //         dom: null,
-    //     }
+        
+        const elements = fiber?.props?.children;
+        // let preSibling = null;
+        // elements.forEach((childrenElement,index) => {
+        //     const newFiber = {
+        //         parent: fiber,
+        //         props: childrenElement.props,
+        //         type: childrenElement.type,
+        //         dom: null,
+        //     }
+    
+        //     if(index === 0) {
+        //         fiber.child = newFiber;
+        //     } else {
+        //         preSibling.sibling = newFiber;
+        //     }
+    
+        //     preSibling = newFiber;
+        // })
+    
+        reconclieChildren(fiber,elements);
+}
 
-    //     if(index === 0) {
-    //         fiber.child = newFiber;
-    //     } else {
-    //         preSibling.sibling = newFiber;
-    //     }
+function useState(initial) {
+    //上一次的hooks的值
+    const preHooks =  wipFiber?.alternate?.hooks?.[hooksIndex]?.state
 
-    //     preSibling = newFiber;
-    // })
+    const hook = {
+        state: preHooks ? preHooks.state : initial,
+        queue: [],
+    }
 
-    reconclieChildren(fiber,elements);
+    const actions = preHooks ? preHooks.queue : [];
+    actions.forEach(action => {
+        hook.state = action
+    })
+    const setState = action => {
+        hook.queue.push(action)
+        workRoot = {
+            dom: currentRoot.dom,
+            props: currentRoot.props,
+            alternate: currentRoot,
+        }
+    
+        nextUnitOfWork = workRoot;
+        deletes = [];
+    }
+    wipFiber.hooks.push(hook)
+    hooksIndex++;
+
+    return [hook.state,setState]
+
+
+}
+
+function updateFunctionComponent(fiber) {
+    wipFiber = fiber;
+    wipFiber.hooks = [];
+    hooksIndex = 0;
+    const children = [fiber.type(fiber.props)];
+    reconclieChildren(fiber,children)
+}
+
+function perforUnitOfWork(fiber) {
+    //判断函数组件
+    if(fiber.type instanceof Function) {
+        updateFunctionComponent(fiber)
+    }else {
+        updatehHostComponent(fiber)
+    }
 
     //return 下一个任务单元
     if(fiber.child) {
@@ -146,11 +201,23 @@ function updateDom(dom,preProps,nextProps) {
         .forEach(name => dom[name] = nextProps[name])
 }
 
+function commitDelete(fiber,parentDom) {
+    if(fiber.dom) {
+        parentDom.removeChild(fiber,dom)
+    }else {
+        commitDelete(fiber.child,parentDom)
+    }
+}
+
 function commitWork(fiber) {
     if(!fiber) return
 
-    const parentDom = fiber.parent.dom;
-    
+    //const parentDom = fiber.parent.dom;
+    let domParentFiber = fiber.parent;
+    while(!domParentFiber.dom) {
+        domParentFiber = domParentFiber.parent;
+    }
+    const parentDom = domParentFiber.dom;
     switch(fiber.effectTag) {
         case 'PLACEMENT' :
             fiber.dom && parentDom.appendChild(dom);
@@ -159,7 +226,8 @@ function commitWork(fiber) {
             fiber.dom && updateDom(fiber.dom,fiber.alternate,fiber.props);
             break;
         case 'DELETE' :
-            fiber.dom && parentDom.removeChild(dom);
+            //fiber.dom && parentDom.removeChild(dom);
+            commitDelete(fiber,parentDom);
             break;
         default :
             break;
@@ -193,7 +261,7 @@ function workLoop() {
 
     requestIdleCallback(workLoop);
 }
-
+requestIdleCallback(workLoop);
 function createDom() {
     //创建daom元素
     const dom = element.type === 'Text_ELEMENT'
